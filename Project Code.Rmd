@@ -1,0 +1,349 @@
+---
+title: "Do Holidays affect weekly sales in Walmart stores"
+author: "Payal, Soumya and Jayesh"
+date: "12/03/2023"
+output:
+  html_document: default
+  header-includes: \usepackage{color}
+  pdf_document: default
+fontsize: 12pt
+margin: 1in
+---
+
+
+```{r setup, cache = F, echo = F, message = F, warning = F, tidy = F, results='hide'}
+# make this an external chunk that can be included in any file
+options(width = 100)
+knitr::opts_chunk$set(message = F, error = F, warning = F, comment = NA, fig.align = 'center', dpi = 100, tidy = F)
+
+#setwd("/Users/jayeshzambre/Documents/Study/First Quater/Econometrics/Group Project")  
+#getwd()
+
+
+
+# Loading the required packages 
+library(tidyverse)
+library(doBy)
+library(foreign)
+library(knitr)
+library(lmtest)
+library(readstata13)
+library(sandwich)
+library(stargazer)
+library(AER)
+library(gdata)
+library(wooldridge)
+library(openintro)
+library(readxl)
+library(plm)
+library(dplyr)
+
+# defining function for heteroskedasticity and autocorrelation-consistent standard errors for panel data
+clse = function(reg){
+  G = length(unique(index(reg,"id")))
+  N = length(index(reg,"id"))
+  dfa = (G/(G - 1))
+  rob = sqrt(diag(dfa*vcovHC(reg, method="arellano", type = "HC1",cluster = "group")))
+  return(rob)
+  }
+
+```
+
+### Abstract
+\vspace{-0.9em}
+
+Walmart, a prominent retail giant in the United States, is actively seeking to enhance the precision of sales and demand forecasting. In pursuit of this goal, the company is leveraging sales data obtained from 45 of its stores. Notably, Walmart strategically organizes various promotional markdown events, strategically aligning them with significant holidays throughout the year. The most notable among these holidays include the Super Bowl, Labour Day, Thanksgiving, and Christmas. These events, accompanied by corresponding markdowns, play a pivotal role in influencing the daily sales dynamics at Walmart. The analysis of these patterns is crucial for Walmart to anticipate and respond effectively to fluctuations in consumer demand surrounding key events and holidays.
+
+
+In the course of this research, our primary focus is to analyze the sales data from 45 Walmart stores and unravel the causal relationships between various factors. Particularly, we aim to discern the impact of holidays on store sales, and concurrently, we will explore the influence of additional variables such as temperature, Fuel Prices, Consumer Price Index (CPI), and unemployment rates on the sales performance of these stores. This comprehensive approach seeks to provide a nuanced understanding of the intricate interplay between different factors and their collective impact on the sales dynamics of the 45 stores under examination. Through this investigation, we aspire to contribute valuable insights that can inform strategic decision-making.
+
+
+### Question of Interest
+\vspace{-0.9em}
+
+Do Holidays impact Walmart Store Sales?
+
+### Associated Hypothesis
+\vspace{-0.9em}
+
+Null Hypothesis: \(\text{Coefficient of Holiday Flag} = 0\)
+
+Alternate Hypothesis: \(\text{Coefficient of Holiday Flag} \neq 0\)
+
+
+```{r data_load, echo=FALSE, warning=FALSE, fig.width=3, fig.height=2.5}
+
+# Data section: loading the wallmart sales data 
+data <- read.csv("Walmart.csv")
+
+#str(data)
+
+# dropping rows with missing values
+data<-drop_na(data,c("Weekly_Sales", "Holiday_Flag", "Temperature","Fuel_Price", "CPI","Unemployment"))
+
+# changing the format of date columns
+data$Date <- as.Date(data$Date, format = "%m/%d/%y")
+
+# converting date column to month, quarter and year
+data$Year <- as.numeric(format(data$Date, "%y"))
+data$Quarter <- quarters(data$Date)
+data$Month <- as.numeric(format(data$Date, "%m"))
+
+# Converting weekly sales in million US Dollars
+data$Weekly_Sales <- data$Weekly_Sales/1000000
+
+
+```
+
+
+
+### Data and Interpretation of variables
+\vspace{-0.9em}
+
+Data Source: [Walmart weekly sales dataset](https://www.kaggle.com/datasets/yasserh/walmart-dataset)
+
+This data set covers 6,435 observations and the following 8 descriptive variables about Walmart weekly sales:
+\vspace{-1.2em}
+
+* **Store**: Store Numbers
+* **Date**: Start date of the week
+* **Weekly Sales**: Weekly Sales for the given store (in million US Dollars)
+* **Holiday Flag**: Dummy =1 when the week contains these holidays: SuperBowl, Labour Day, Thanksgiving, and Christmas and 0 otherwise
+* **Temperature**: Average Temperature in the region for the given week (in Fahrenheit)
+* **Fuel Price**: Cost of fuel in the region for the given week (In US Dollars)
+* **CPI**: Consumer Price Index for the given week (This is the average change in price over time of a market basket of consumer goods and services)
+* **Unemployment**: Unemployment rate for the region for the given week (This is the number of unemployed people as a percentage of the labor force)
+
+
+### Descriptive Statistics
+
+
+```{r Desc_stats, echo=FALSE, message=FALSE, warning=FALSE, comment=""}
+
+# Creating a table of descriptive statistics using stargazer command
+stargazer(data[c("Weekly_Sales", "Holiday_Flag", "Temperature", "Fuel_Price")], 
+                type="text", digits=2, summary.stat=c("n", "mean", "median", "sd", "min", "max"),
+                flip=FALSE, covariate.labels=c("Weekly Sales", "Holiday Flag", "Temperature", "Fuel Price"))
+
+stargazer(data[c("CPI", "Unemployment")], 
+                type="text", digits=2, summary.stat=c("n", "mean", "median", "sd", "min", "max"),
+                flip=FALSE, covariate.labels=c("CPI", "Unemployment"))
+
+
+
+```
+
+* **Weekly Sales**: The average weekly store sales 1.05 million USD. The distribution is slightly right-skewed, as the mean is higher than the Median. Standard deviation of 0.56 million USD indicates that there is a good amount of variation.
+
+* **Temperature**: The average Temperature is 60.66 Fahrenheit. The distribution is left-skewed, as the mean is lower than the Median. Standard deviation of 18.44 Fahrenheit indicates that there is a good amount of variation.
+
+* **Fuel Price**: The average Fuel Price is 3.36 USD. The distribution is left-skewed, as the mean is lower than the Median. Standard deviation of 0.46 USD indicates that there is a good amount of variation.
+
+* **CPI**: The average CPI is 171.58. The distribution is left-skewed, as the mean is lower than the Median. Standard deviation of 39.36 indicates that there is a good amount of variation.
+
+* **Unemployment**: The average unemployment rate is 8%. The distribution is slightly right-skewed, as the mean is higher than the Median. Standard deviation of 1.88% indicates that there is a good amount of variation.
+
+\newpage
+
+#### Is there a relationship between Store Sales and Holiday
+
+
+```{r Correlation, echo=FALSE, message=F, warning=FALSE, comment="", fig.width=8, fig.height=4}
+
+## Plotting average weekly sales over time
+
+result <- data %>%
+  group_by(Date) %>%
+  summarize(average_value = mean(Weekly_Sales))
+
+
+ggplot(result, aes(x=Date, y=average_value)) + geom_line(col="blue")+
+labs(title = "Weekly Sales Over Time", x = "Date", y = "Average Weekly Sales (in USD million)") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5), axis.title.x = element_text(size = 8), axis.title.y = element_text(size = 8),
+  axis.text = element_text(size = 6))
+```
+
+
+The visual representation above illustrates a noteworthy surge in store sales, particularly during holiday periods. The spikes in sales are most pronounced during Thanksgiving and Christmas, underscoring a significant and impactful boost in consumer activity during these festive occasions. This observation underscores the considerable influence that holidays, and especially Thanksgiving and Christmas, have on driving heightened consumer engagement and increased sales in Walmart stores.
+
+
+
+```{r Correlation_log, echo=FALSE, message=F, warning=FALSE, comment="", fig.width=8, fig.height=4}
+
+# Plotting log of average weekly sales over time
+ggplot(result, aes(x=Date, y=log(average_value))) + geom_line(col="blue")+
+labs(title = "Log(Weekly Sales) Over Time", x = "Date", y = "Average Weekly Sales (in USD million)") + 
+  theme(plot.title = element_text(size = 10, hjust = 0.5), axis.title.x = element_text(size = 8), axis.title.y = element_text(size = 8),
+  axis.text = element_text(size = 6))
+
+```
+
+Upon plotting the logarithm of store sales against the respective dates, the transformed data exhibits more normalized distribution which helps to stabilize the variance in data and interpret the results more easily. This transformation not only enhances the statistical properties of the data but also facilitates a more straightforward interpretation of the results.
+
+
+### Baseline Specification
+
+#### Regression analysis with linear specification
+
+```{r Baseline1, echo=FALSE, warning=FALSE, fig.width=0.01, fig.height=0.01}
+
+#Regressing Log of Weekly sales on Holiday Flay, Fuel Price, Temperature, Unemployment and CPI
+lm1 <- plm(log(Weekly_Sales) ~ Holiday_Flag, data=data, index=c("Store", "Year"), model="within", effect="twoways")
+lm2 <- plm(log(Weekly_Sales) ~ Holiday_Flag + Fuel_Price, data=data, index=c("Store", "Year"), model="within", effect="twoways")
+lm3 <- plm(log(Weekly_Sales) ~ Holiday_Flag + Fuel_Price + Temperature, data=data, index=c("Store", "Year"), model="within", effect="twoways")
+lm4 <- plm(log(Weekly_Sales) ~ Holiday_Flag + Fuel_Price + Temperature + CPI, data=data, index=c("Store", "Year"), model="within", effect="twoways")
+lm5 <- plm(log(Weekly_Sales) ~ Holiday_Flag + Fuel_Price + Temperature + CPI + Unemployment, data=data, index=c("Store", "Year"), model="within", effect="twoways")
+lm6 <- plm(log(Weekly_Sales) ~ Holiday_Flag + Fuel_Price + Temperature + CPI + Unemployment, data=data, index=c("Store", "Year"), model="within", effect="twoways")
+
+stargazer(lm1, lm2, lm3, lm4, lm5, se=list(clse(lm1), clse(lm2), clse(lm3), clse(lm4), clse(lm5)), type = "text", title = "Fixed Effects Panel Regression with Linear terms" , star.cutoffs=NA, df=FALSE, font.size = "small", column.sep.width = "1pt")
+
+
+```
+
+
+We performed a fixed-effects panel regression, accounting for variations across specific stores and over time by treating store numbers and years as fixed factors. This approach enhances the precision of our analysis, enabling a more accurate assessment of the relationships within the dataset and isolating the impact of various explanatory variables on the dependent variable.
+
+We enhanced the reliability of our analyses by addressing potential issues related to heteroskedasticity and autocorrelation. Specifically, we employed Heteroskedasticity and Autocorrelation-Consistent (HAC) standard errors, ensuring more accurate and robust parameter estimates. This approach contributes to the overall robustness of our findings by accounting for variations in variance and autocorrelation within the data.
+
+
+**Regression 1**: We regressed weekly store sales on Holiday Flag. As expected, Holidays have a positive impact on weekly store sales. The estimated coefficient indicates that weekly store sales increases by 17.9% during the weeks with Holidays. T-Stat for the coefficient is 0.179/0.010 = 17.9 which indicates that the coefficient is statistically significant at 1% significance level.
+
+**Regression 2**: After adding Fuel Price, we notice that the coefficient of Holiday Flag increased from 0.179 to 0.182 indicating a slight downward omitted variable bias and a negative relationship between Fuel Price and Holiday Flag. The negative relationship is however very small and hence the bias is not very high. T-Stat for the coefficient is 0.182/0.010 = 18.2 which indicates that the coefficient is statistically significant at 1% significance level.
+
+**Regression 3**: After adding Temperature, we notice that the coefficient of Holiday Flag remains almost the same. T-Stat for the coefficient is 0.181/0.011 = 16.45 which indicates that the coefficient is statistically significant at 1% significance level. The coefficient of added Temperature variable indicates that keeping everything else constant, a 1 Fahrenheit increase in Temperature, increases store sales by a meagre 0.2%. Also, the coefficient of Temperature is not statistically significant at 5% significance level.
+
+**Regression 4**: After adding CPI, we notice that the coefficient of Holiday Flag decreases from 0.181 to 0.175 indicating an upward omitted variable bias and a positive relationship between CPI and Holiday Flag. T-Stat for the coefficient is 0.175/0.009 = 19.44 which indicates that the coefficient is statistically significant at 1% significance level. The coefficient of Temperature now became statistically significant and its economic significance also doubles from 0.2% to 0.4%. The coefficient of CPI is statistically significant at 5% significance level. On average, an 1 unit increase in CPI increase store sales by 1.1%.
+
+**Regression 5**: After adding Unemployment rate, we notice that the coefficient of Holiday Flag remains almost the same. T-Stat for the coefficient is 0.173/0.009 = 19.22 which indicates that the coefficient is statistically significant at 1% significance level. The coefficient of Fuel Price, Temperature and CPI  remains unchanged when we add the Unemployment rate variable in regression.
+
+We also observe that the coefficient of all variables is statistically significant at 5% significance level in Regression 5. The coefficient of Holiday Flag does not see drastic changes as we add more variables, indicating that the omitted variable bias is not very high. However adjusted R2 increased from 13.4% to 17.4% as we added the variables and hence the model is now able to explain more of the variance in weekly store sales.
+
+\newpage
+
+#### Regression analysis with higher order effects
+
+```{r Baseline2, echo=FALSE, warning=FALSE, fig.width=0.01, fig.height=0.01}
+
+#Regressing Log of Weekly sales on Holiday Flay, Fuel Price, Temperature, Unemployment and CPI and their quadratic terms
+lm6 <- plm(log(Weekly_Sales) ~ Holiday_Flag + Fuel_Price + Temperature + CPI + Unemployment + I(Fuel_Price^2), data=data, index=c("Store", "Year"), model="within", effect="twoways")
+lm7 <- plm(log(Weekly_Sales) ~ Holiday_Flag + Fuel_Price + Temperature + CPI + Unemployment + I(Fuel_Price^2) + I(Temperature^2), data=data, index=c("Store", "Year"), model="within", effect="twoways")
+lm8 <- plm(log(Weekly_Sales) ~ Holiday_Flag + Fuel_Price + Temperature + CPI + Unemployment + I(Fuel_Price^2) + I(Temperature^2) + I(CPI^2), data=data, index=c("Store", "Year"), model="within", effect="twoways")
+lm9 <- plm(log(Weekly_Sales) ~ Holiday_Flag + Fuel_Price + Temperature + CPI + Unemployment + I(Fuel_Price^2) + I(Temperature^2) + I(CPI^2) + I(Unemployment^2), data=data, index=c("Store", "Year"), model="within", effect="twoways")
+
+stargazer(lm5, lm6, lm7, lm8, lm9, se=list(clse(lm5), clse(lm6), clse(lm7), clse(lm8), clse(lm9)), type = "text", title = "Fixed Effects Panel Regression with Linear and Polynomial terms",  star.cutoffs=NA, df=FALSE, font.size = "small", column.sep.width = "1pt")
+
+
+```
+
+***
+
+```{r ftest1, echo=FALSE, warning=FALSE, fig.width=0.01, fig.height=0.01}
+
+lht(lm9, c("Temperature=0", "I(Temperature^2)=0"), white.adjust="hc1")
+```
+
+
+```{r ftest2, echo=FALSE, warning=FALSE, fig.width=0.01, fig.height=0.01}
+
+lht(lm9, c("I(Temperature^2)=0"), white.adjust="hc1")
+```
+
+
+```{r ftest3, echo=FALSE, warning=FALSE, fig.width=0.01, fig.height=0.01}
+
+lht(lm9, c("Unemployment=0", "I(Unemployment^2)=0"), white.adjust="hc1")
+```
+
+
+```{r ftest4, echo=FALSE, warning=FALSE, fig.width=0.01, fig.height=0.01}
+
+lht(lm9, c("I(Unemployment^2)=0"), white.adjust="hc1")
+
+```
+
+
+
+To explore potential higher-order effects on weekly store sales, we systematically introduced quadratic terms one by one. This resulted in an  enhanced model fit increasing adjusted R-squared from 17.4% to 20.5%.Since this is a panel data varing across stores and time, we are unable to plot the relationship between the variable to identify the higher order effect and hence rely on the regressions model.
+
+The coefficient of Fuel Price and its quadratic term is statistically significant. We observed that the impact of Fuel Price reduces for higher values of Fuel Price as the coefficient of quadratic term is negative. Also, we observed that the impact of CPI increases for higher values of CPI as the coefficient of quadratic term is positive. 
+
+We conducted F-tests on Regression 5 to assess the significance of the quadratic terms for Unemployment and Temperature. We reject the null hypothesis that either of the coefficients of quadratic or linear term of Temperature is zero. Also, F-test reveal that the quadratic term for Unemployment does not attain statistical significance at the 5% level. Consequently, we deduce that Regression 4 stands out as a superior model compared to Regression 5. While the linear and quadratic terms of Temperature are statistically significant, their economic significance is very low.
+
+
+### Alternate Specifications
+
+#### Regression analysis with interaction terms
+
+```{r Baselin3, echo=FALSE, warning=FALSE,fig.width=1, fig.height=1}
+
+#Regressing Log of Weekly sales on Holiday Flay, Fuel Price, Temperature, Unemployment, CPI, their quadratic terms and interactions with holiday flag
+lm10 <- plm(log(Weekly_Sales) ~ Holiday_Flag + Fuel_Price + Temperature + CPI + Unemployment + I(Fuel_Price^2)  + I(CPI^2) + I(Temperature^2) + I(Holiday_Flag*Fuel_Price) + I(Holiday_Flag*Temperature) + I(Holiday_Flag*CPI) + I(Holiday_Flag*Unemployment),  data=data, index=c("Store", "Year"), model="within", effect="twoways")
+
+
+lm11 <- plm(log(Weekly_Sales) ~ Holiday_Flag + Fuel_Price  + Temperature +CPI  + Unemployment + I(Fuel_Price^2) + I(CPI^2) + I(Temperature^2) + I(Holiday_Flag*Temperature), data=data, index=c("Store", "Year"), model="within", effect="twoways")
+
+stargazer(lm8, lm10, lm11, se=list(clse(lm8), clse(lm10), clse(lm11)), type = "text", star.cutoffs=NA, df=FALSE, font.size = "small")
+
+```
+
+
+***
+
+```{r ftest5, echo=FALSE, warning=FALSE, fig.width=0.01, fig.height=0.01}
+
+lht(lm10, c("I(Holiday_Flag * Fuel_Price) = 0", "I(Holiday_Flag * CPI) = 0", "I(Holiday_Flag * Unemployment) = 0"), white.adjust="hc1")
+```
+
+***
+
+
+
+In order to capture potential variations in the impact of the Holiday Flag on store sales based on other factors, we introduced interaction terms by interacting the Holiday Flag with each individual variable. Based on F-test above, we conclude that only the interaction between the Holiday Flag and Temperature proved to be statistically significant at 5% level. Additionally, we conducted F-tests for the remaining interactions, leading us to the conclusion that none of these interactions exhibited statistical significance. 
+
+The coefficient of CPI, I(CPI2) and Unemployment remains the same after interactions with holiday flag between regression-1 and regression-3 in the above table. The coefficient of Fuel Price and its quadratic term doesn't see major changes. The coefficient of Temperature and its quadratic term doubles and both of these become statistically significant at 5% significant level. The coefficient of Holiday flag increases from 0.168 to 0.386 and exhibits strong dependency on Temperature, which indicates that different holiday which occurred during different seasons/time of the year have different impact on the Walmart weekly store sales.
+
+
+##### Baseline Regression Model:
+Therefore, Regression 3, as presented in the table above, serves as our regression model. This particular model successfully accounts for 23.4% of the variability observed in the Weekly Store Sales of Walmart. Importantly, all coefficients in this model exhibit statistical significance at the 5% level. Furthermore, it is noteworthy that each coefficient holds economic significance as well.
+
+
+
+#### Regression to understand effect of different Holidays
+
+```{r Baseline4, echo=FALSE, warning=FALSE,fig.width=1, fig.height=1}
+
+# Creating 4 dummy variables for 4 different types of holidays
+data$Holiday_SB <- ifelse(data$Holiday_Flag == 1 & data$Month == 2, 1, 0)
+data$Holiday_LD <- ifelse(data$Holiday_Flag == 1 & data$Month == 9, 1, 0)
+data$Holiday_TG <- ifelse(data$Holiday_Flag == 1 & data$Month == 11, 1, 0)
+data$Holiday_CH <- ifelse(data$Holiday_Flag == 1 & data$Month == 12, 1, 0)
+
+#Regressing Log of Weekly sales on Holiday flag dummies, Fuel Price, Temperature, Unemployment, CPI, their quadratic terms and interactions with holiday flag
+lm12 <- plm(log(Weekly_Sales) ~ Holiday_SB + Holiday_LD + Holiday_TG + Holiday_CH + Fuel_Price  + Temperature +CPI  + Unemployment + I(Fuel_Price^2) + I(CPI^2) + I(Temperature^2) + I(Holiday_SB*Temperature) + I(Holiday_LD*Temperature) + I(Holiday_TG*Temperature) + I(Holiday_CH*Temperature), data=data, index=c("Store", "Year"), model="within", effect="twoways")
+
+stargazer(lm11, lm12, se=list(clse(lm11), clse(lm12)), type = "text", title = "Fixed Effects Panel Regression with different holidays dummies", star.cutoffs=NA, df=FALSE, font.size = "small")
+
+
+
+```
+
+
+In our pursuit of unraveling the distinct impacts of various holidays on store sales, we introduced four distinctive dummy variables to characterize Super Bowl, Labor Day, Thanksgiving, and Christmas holidays (when all the dummy variables are 0 it indicates a non-holiday week). Holding other variables constant and considering an average Temperature of 60.66 Fahrenheit, our observations revealed that during Super Bowl week, store sales registered an 11.83% increase; Labor Day week witnessed a 17.37% boost; Thanksgiving week experienced a noteworthy 25% surge, and the festive spirit of Christmas contributed to a remarkable 27.5% upswing in store sales, all compared to regular days. 
+
+
+### Conclusion
+
+Holiday has a strong causal effect on weekly stores sales of Walmart.
+
+* Specifically, at an average Temperature of 60.66 degrees Fahrenheit, on average, weekly store sales during holiday weeks were notably 14.34% higher than during non-holiday weeks, everything else being constant. This uptick is particularly pronounced during Thanksgiving and Christmas weeks, while it is comparatively less during Super Bowl and Labour Day.
+
+Moreover, economic indicators such as the Consumer Price Index (CPI), Fuel Price, and Unemployment play pivotal roles in shaping store sales. In particular:
+
+* On average, for every 1 unit increase in the CPI from its mean value of 171.58, weekly store sales experience a notable increase of 2.66%, with other variables held constant.
+* Conversely, a 1 percentage point increase in the unemployment rate, with all other factors unchanged, results in an average decrease of 3.7% in weekly store sales.
+* Similarly, all other factors remaining constant, on average, for a `$`0.10 rise in Fuel Prices from its mean value of `$`3.36 corresponds to a reduction in store sales by 6.53%.
+
+While not individually of high economic significance, Temperature is an additional variable of interest. It plays a crucial role in influencing how various holidays impact sales, adding a nuanced layer to our understanding of the sales dynamics.
+
+**Internal and External Validity**: 
+A potential challenge in our study is sample selection bias, as we are specifically examining a subset of Walmart stores across the United States. This could introduce a distortion in our results, emphasizing the need for careful interpretation and consideration of the sample's representativeness. Addressing this issue proactively will enhance the reliability and applicability of our study.
